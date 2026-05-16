@@ -1,0 +1,30 @@
+fuzzable:
+    Origin Flags: False
+    Origin Type Code: False
+    Origin Length: False
+    Origin IGP: False
+    As Flags: False
+    As Type Code: False
+    As Length: False
+    Local Flags: False
+    Local Type Code: False
+    Local Length: False
+    Local Preference: False
+    Extended Flags: False
+    Extended Type: False
+    Extended Length: False
+    Extended Communities: False
+    Optional, Non-transitive, complete: False
+    Type code MP_REACH_NLRI: False
+    AFI IPv4: False
+    SAFI Labeled Unicast: False
+    Next Hop: False
+    SNPA: False
+    Destination prefix filter: True
+    Destination prefix filter mask: True
+    Destination prefix filter prefix: True
+    Protocal next header filter: False
+    Operator flags: False
+    Protocal value: True
+    Destination Port Filter: True
+    Source Port Filter: True

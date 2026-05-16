@@ -585,7 +585,7 @@ if __name__ == '__main__':
     '''
     Instantiate and run a test suite
     '''
-    fuzzer = BgpUpdateFuzzer_1(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
+    #fuzzer = BgpUpdateFuzzer_1(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
     #fuzzer = BgpUpdateFuzzer_2(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
     #fuzzer = BgpUpdateFuzzer_3(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
     #fuzzer = BgpUpdateFuzzer_4(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
@@ -593,5 +593,5 @@ if __name__ == '__main__':
     #fuzzer = BgpUpdateFuzzer_6(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
     #fuzzer = BgpUpdateFuzzer_7(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
     #fuzzer = BgpUpdateFuzzer_8(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    #fuzzer = BgpUpdateFuzzer_9(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
+    fuzzer = BgpUpdateFuzzer_9(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
     fuzzer.do_fuzz()
