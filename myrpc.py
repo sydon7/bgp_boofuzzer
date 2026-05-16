@@ -105,12 +105,60 @@ class FRRMonitor(TargetMonitor):
         super().__init__(binary_path)
 
     def stop_target(self):
-        command = 'systemctl stop frr'
+        command = 'sudo systemctl stop frr'
         subprocess.run(command.split(' '))
 
     def start_target(self):
-        command = 'systemctl start frr'
+        command = 'sudo systemctl start frr'
         subprocess.run(command.split(' '))
+
+    def is_target_alive(self, timeout):
+        pid = None
+        try:
+            time.sleep(timeout)
+            command = ['pgrep', '-u', 'frr', '-f', self.binary_path]
+            output = subprocess.check_output(command)
+            pid = int(output)
+        except:
+            pass
+        if pid == None:
+            return False
+        else:
+            return True
+
+'''
+This is the monitor class that is specific to EXABGP.
+
+
+'''
+class EXAMonitor(TargetMonitor):
+    def __init__(self, binary_path='/home/wiechman/venv/exa1/bin/exabgp'):
+        super().__init__(binary_path)
+
+    def stop_target(self):
+        pass
+        #command = 'sudo systemctl stop frr'
+        #subprocess.run(command.split(' '))
+
+    def start_target(self):
+        pass
+        #command = 'sudo systemctl start frr'
+        #subprocess.run(command.split(' '))
+    def is_target_alive(self, timeout):
+        pid = None
+        try:
+            time.sleep(timeout)
+            command = ['pgrep', '-f', self.binary_path]
+            output = subprocess.check_output(command)
+            pid = int(output)
+        except:
+            pass
+        if pid == None:
+            return False
+        else:
+            return True
+
+
 
 '''
 This is the monitors class that is specific to OpenBGPD.
@@ -194,11 +242,14 @@ if __name__ == '__main__':
     if args.ip != None and args.port != None:
         monitor = None
         if args.monitor_kind.lower() == 'frr':
-           monitor = FRRMonitor() 
+            monitor = FRRMonitor() 
         elif args.monitor_kind.lower() == 'bird':
-           monitor = BIRDMonitor()
+            monitor = BIRDMonitor()
         elif args.monitor_kind.lower() == 'openbgpd':
-           monitor = OpenBgpdMonitor()
+            monitor = OpenBgpdMonitor()
+        elif args.monitor_kind.lower() == 'exabgpdocker':
+            monitor = EXAMonitor()
+
         else:
             print('The monitor \'%s\' is not supported!' % args.monitor_kind)
             sys.exit(-1)
