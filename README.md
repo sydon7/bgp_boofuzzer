@@ -1,144 +1,239 @@
-# A simple BGP fuzzer based on BooFuzz
+# BGP BooFuzzer — Flowspec Fork
 
-The goal of this project was to implement a simple black-box fuzzer for various
-BGP protocol implementations. For the moment, the focus of the fuzzer is
-malformed packets, but we believe that it can be extended to cover some of the
-bugs related to the BGP state machine. We chose to build upon
-[BooFuzz](https://boofuzz.readthedocs.io/en/stable/).
+This is a fork of [bgp_boofuzzer](https://github.com/Northind/bgp_boofuzzer), a black-box BGP fuzzer built on [BooFuzz](https://boofuzz.readthedocs.io/en/stable/). The original tool is preserved (see [README_original.md](README_original.md)).
 
-# Usage
+This fork adds **configuration-file-driven fuzzing** and a dedicated **BGP Flowspec (RFC 5575) fuzzer** that targets the `MP_REACH_NLRI` path attribute in BGP UPDATE messages.
 
-Before running the tool for the first time, make sure you have installed all the
-necessary python packages:
+---
+
+## What's New
+
+| Addition | Purpose |
+|---|---|
+| `fuzz_flowspec.py` | Flowspec NLRI fuzzer (dest/src prefix, protocol, ports) |
+| `fuzz_flowspec_flags.py` | Flowspec NLRI fuzzer extended with TCP flags (type 9) |
+| `utils/fuzz_utils.py` | Config-aware utility class that bridges YAML config and BooFuzz primitives |
+| `bgp_defaults.yaml` | Default byte values for every packet field |
+| `fuzz_configs/` | Fuzz profiles — per-field on/off switches for which fields to mutate |
+
+---
+
+## Concepts
+
+### Config file (`bgp_defaults.yaml`)
+
+Defines the **default byte value** for each named packet field. When a field is not being fuzzed it is emitted as a `s_static` using this value, keeping the packet otherwise well-formed.
+
+```yaml
+default_values:
+    Origin Flags: "40"
+    Origin Type Code: "01"
+    AFI IPv4: "00 01"
+    SAFI Labeled Unicast: "85"
+    Destination prefix filter: "01"
+    Destination Port: "00 03"
+    # ...
+```
+
+Values are hex strings (spaces allowed). You can supply a different config file via `--configfile`.
+
+### Fuzz profile (`fuzz_configs/*.yaml`)
+
+Controls **which fields BooFuzz actually mutates**. Each field maps to `True` (fuzz it) or `False` (emit the default value unchanged).
+
+```yaml
+fuzzable:
+    Origin Flags: False
+    Destination prefix filter: True
+    Destination prefix filter mask: True
+    Protocal value: True
+    # ...
+```
+
+Profiles let you target a specific slice of the packet without touching unrelated fields. Four profiles are included:
+
+| File | What it fuzzes |
+|---|---|
+| `fuzz_configs/flowspec_fuzz_profile1.yaml` | Destination prefix (type 1), source prefix (type 2), protocol value, destination/source port type codes |
+| `fuzz_configs/flowspec_fuzz_profile2.yaml` | Protocol value only |
+| `fuzz_configs/flowspec_fuzz_config2.yaml` | Protocol value only (alternate baseline) |
+| `fuzz_configs/flowspc_fuzz_default_false.yaml` | All fields `False` — sends a valid packet, useful for connectivity checks |
+
+`fuzzfile.yaml` (project root) is a spare all-`False` profile you can copy and customise.
+
+### How they interact
+
+```
+bgp_defaults.yaml          fuzz profile
+       │                        │
+       └──────── fuzz_utils ────┘
+                     │
+             BooFuzz primitives
+          (s_static / s_byte / s_bytes)
+```
+
+`bgp_fuzz_utils_class` (in `utils/fuzz_utils.py`) reads both files at startup. For each named field it emits either:
+- `s_static(value=<default>)` — when the profile marks the field `False`
+- `s_byte` / `s_bytes(fuzzable=True)` — when the profile marks the field `True`
+
+If no fuzz profile is supplied, every field that the script calls with `random_options=False` is emitted as `s_static`.
+
+---
+
+## Installation
 
 ```bash
-$ pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-## Starting the "crash" monitor on a target machine
+---
 
-The fuzzer provides a simple "crash" monitor (we use quotes here because there's
-actually no way to tell whether the actual crash has occurred, we merely query
-the target's PID to check if the target is still alive).
+## Running the Flowspec Fuzzer
 
-This feature is experimental and does not work reliably for all possible
-targets. Still, when it works, it's quite handy, as it allows to quickly check
-whether the latest test case has potentially crashed the target. In addition, it
-generates a PoC out of the latest failed test case, which is also quite handy
-for test cases with random fuzzload that cannot be generated in a deterministic
-manner. Finally, the monitor will attempt to restart the target if its process
-dies for whatever reason - this is quite convenient for running long campaigns.
-
-Currently, the monitor supports: `FRRouting`, `BIRD`, and `OpenBGPD`, but can be
-extended to other targets as well (see the comments in the `myrpc.py` file).
-
-To start the monitor on a target machine, copy the code (also, make sure to
-install the python packages mentioned in the `requirements.txt` file), and run
-the following command:
+### Basic syntax
 
 ```bash
-$ python myrpc.py --ip [TARGET'S IP] --port [RPC port] --monitor [frr | bird | openbgpd]
+python fuzz_flowspec.py \
+    --fbgp_id <FUZZER_BGP_ID> \
+    --fasn    <FUZZER_ASN> \
+    --tip     <TARGET_IP> \
+    --trpc_port <RPC_PORT> \
+    --fuzzprofile <PROFILE_YAML> \
+    [--configfile <DEFAULTS_YAML>]
 ```
 
-If everything goes well, you should see something like this (the target's PID is
-shown in the square brackets): 
+`--configfile` defaults to `bgp_defaults.yaml` if omitted.
+
+### Examples
+
+Fuzz destination prefix, source prefix, and protocol fields:
 
 ```bash
-$ python myrpc.py --ip 192.168.56.127 --port 1234 --monitor frr
-
-Resetting the target...
-Attached to [14292] -> /usr/lib/frr/bgpd
-```
-Note, the above command might require root permissions, depending on your setup.
-
-## Choosing a fuzz suite to run
-
-There are several fuzzer scripts that are currently available out of the box:
-
-* `fuzz_open.py` - Provides fuzz suites related the BGP OPEN message.
-* `fuzz_update.py` - Provides fuzz suites related the BGP UPDATE message.
-* `fuzz_route_refresh.py` - Provides fuzz suites related the BGP ROUTE REFRESH message.
-* `fuzz_notification.py` - Provides fuzz suites related the BGP NOTIFICATION message.
-
-To switch between test cases, simply comment/uncomment those that you wish to
-discard/use. For example, here's an excerpt from `fuzz_open.py` where we'd like
-to run only the first one:
-
-```python
-'''
-Modify this code to choose different test suites and parameters.
-'''
-if __name__ == '__main__':
-
-    # code omitted for brevity
-
-    '''
-    Instantiate and run a test suite
-    '''
-    fuzzer = BgpOpenFuzzer_1(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    #fuzzer = BgpOpenFuzzer_2(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    #fuzzer = BgpOpenFuzzer_3(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    #fuzzer = BgpOpenFuzzer_4(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    #fuzzer = BgpOpenFuzzer_5(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    #fuzzer = BgpOpenFuzzer_6(bgp_id=FBGP_ID, asn_id=FASN, rhost=TIP, rpc_port=TRPC_PORT)
-    fuzzer.do_fuzz()
+python fuzz_flowspec.py \
+    --fbgp_id 10.0.2.15 \
+    --fasn 1234 \
+    --tip 10.3.1.118 \
+    --trpc_port 1234 \
+    --fuzzprofile fuzz_configs/flowspec_fuzz_profile1.yaml \
+    --configfile bgp_defaults.yaml
 ```
 
-Each test suite contains a short description that explains what kind of
-malformed packets it aims to generate.
-
-## Running the fuzzer
-
-To run a specific fuzz suite, execute the following command:
+Fuzz only the protocol value:
 
 ```bash
-$ [FUZZ SUITE].py --fbgp_id [FUZZER'S BGP IDENTIFIER] --fasn [FUZZER'S ASN] --tip [TARGET'S IP ADDRESS] --trpc_port [TARGET'S RPC PORT]
+python fuzz_flowspec.py \
+    --fbgp_id 10.0.2.15 \
+    --fasn 1234 \
+    --tip 10.3.1.118 \
+    --trpc_port 1234 \
+    --fuzzprofile fuzz_configs/flowspec_fuzz_profile2.yaml
 ```
 
-For example, we might run the fuzz suite related to the BGP OPEN message:
+Send a baseline (unfuzzed) flowspec packet to verify connectivity:
 
 ```bash
-$ python fuzz_open.py --fbgp_id 192.168.56.107 --fasn 2 --tip 192.168.56.127 --trpc_port 1234 
+python fuzz_flowspec.py \
+    --fbgp_id 10.0.2.15 \
+    --fasn 1234 \
+    --tip 10.3.1.118 \
+    --trpc_port 1234 \
+    --fuzzprofile fuzz_configs/flowspc_fuzz_default_false.yaml
 ```
 
-NOTE: a target might not accept BGP messages from peers that are not configured,
-therefore you might need to ensure that the fuzzer's IP address, BGP Identifier
-and ASN are properly configured within the target.
-
-## Getting results
-
-You can monitor the test case execution via the [web interface of
-BooFuzz](https://boofuzz.readthedocs.io/en/stable/user/quickstart.html). If you
-are using our custom "crash" monitor (`myrpc.py`), you may see something like
-this:
+Fuzz TCP flags (type 9) in addition to the standard flowspec components:
 
 ```bash
-
-The target is dead!
-Resetting the target...
-
-Potential crash: [BgpOpenFuzzer_2 -> 138]
-b'\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x1d\x01\x04\x00\x02\x00\xf0\xc0\xa88k\xff'
-
-Attached to [14675] -> /usr/lib/frr/bgpd
+python fuzz_flowspec_flags.py \
+    --fbgp_id 10.0.2.15 \
+    --fasn 1234 \
+    --tip 10.3.1.118 \
+    --trpc_port 1234 \
+    --fuzzprofile fuzz_configs/flowspec_fuzz_profile1.yaml
 ```
 
-As you can see, one of the test cases (`BgpOpenFuzzer_2`) killed the current
-target's process. To reproduce, you may either copy the raw output from here,
-or run a python script that the monitor will generate in the current working
-directory:
+---
+
+## Packet Structure
+
+Both `fuzz_flowspec.py` and `fuzz_flowspec_flags.py` build and send a three-message BGP session:
+
+```
+BGP OPEN  →  BGP KEEPALIVE  →  BGP UPDATE
+```
+
+The UPDATE contains:
+
+```
+BGP UPDATE
+└── Path Attributes
+    ├── ORIGIN
+    ├── AS_PATH
+    ├── LOCAL_PREF
+    ├── EXTENDED_COMMUNITIES (rate-limit community)
+    └── MP_REACH_NLRI  (AFI=1 / SAFI=133 flowspec)
+        └── FLOW_SPEC_NLRI
+            ├── Type 1 — Destination prefix
+            ├── Type 2 — Source prefix
+            ├── Type 3 — Protocol / next header
+            ├── Type 5 — Destination port
+            ├── Type 6 — Source port
+            └── Type 9 — TCP flags  (fuzz_flowspec_flags.py only)
+```
+
+The OPEN message advertises both IPv4 unicast (AFI=1/SAFI=1) and IPv4 flowspec (AFI=1/SAFI=133) capabilities so the target will accept the flowspec UPDATE.
+
+---
+
+## Creating a Custom Fuzz Profile
+
+1. Copy an existing profile:
+
+   ```bash
+   cp fuzz_configs/flowspc_fuzz_default_false.yaml fuzz_configs/my_profile.yaml
+   ```
+
+2. Set the fields you want to fuzz to `True`:
+
+   ```yaml
+   fuzzable:
+       Destination prefix filter: True
+       Destination prefix filter mask: True
+       Destination prefix filter prefix: True
+       # everything else stays False
+   ```
+
+3. Run with your profile:
+
+   ```bash
+   python fuzz_flowspec.py ... --fuzzprofile fuzz_configs/my_profile.yaml
+   ```
+
+Fields not listed in the profile default to **not fuzzed** (`False`).
+
+---
+
+## Crash Monitor (unchanged from upstream)
+
+The optional RPC monitor (`myrpc.py`) watches the target process and generates a PoC script if it crashes. Supported targets: FRRouting, BIRD, OpenBGPD.
+
+Start the monitor on the target machine:
 
 ```bash
-$ ls
-
-BgpOpenFuzzer_2_testcase_138.py
-
-$ python BgpOpenFuzzer_2_testcase_138.py 192.168.56.127
+python myrpc.py --ip <TARGET_IP> --port <RPC_PORT> --monitor [frr | bird | openbgpd]
 ```
 
-# PoCs 
+See [README_original.md](README_original.md) for full monitor documentation and the `PoC/` directory for CVE-2022-40302 and CVE-2022-43681 reproduction scripts.
 
-The purpose of the `PoC` folder is to collect proof-of-concept scripts for bugs
-found either with the fuzzer, or manually. The PoCs scripts that come with the
-tool by default can be used to directly test if a target device is vulnerable to
-CVE-2022-40302 or CVE-2022-43681, which were discovered using the fuzzer.
+---
+
+## Original Fuzz Scripts
+
+The upstream fuzz scripts are still available and work as documented in [README_original.md](README_original.md):
+
+| Script | Targets |
+|---|---|
+| `fuzz_open.py` | BGP OPEN message |
+| `fuzz_update.py` | BGP UPDATE message |
+| `fuzz_route_refresh.py` | BGP ROUTE REFRESH message |
+| `fuzz_notification.py` | BGP NOTIFICATION message |
+| `fuzz_baseline.py` | BGP UPDATE with NLRI prefix and extended group primitives |
